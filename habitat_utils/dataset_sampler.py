@@ -51,7 +51,7 @@ def main():
         json.dump({"episodes": filtered_episodes}, f)
 
     print("The following command opt will work with the new split:")
-    print(f"habitat.dataset.data_path = data/{args.output_split}.json.gz")
+    print(f"habitat.dataset.data_path='data/{args.output_split}.json.gz'")
 
 
 if __name__ == "__main__":
