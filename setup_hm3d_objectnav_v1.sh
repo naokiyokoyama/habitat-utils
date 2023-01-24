@@ -5,6 +5,7 @@ try_symlink() {
     if [ ! -d $2 ] || [ ! -f $2 ]
     then
         ln -s $1 $2
+        echo "Created symlink from" ${1} "to" ${2}
     else
         echo "Error! The following already exists:" ${2}
     fi
