@@ -13,7 +13,7 @@ from habitat.datasets.pointnav.pointnav_generator import generate_pointnav_episo
 from omegaconf import DictConfig
 
 
-parent_dir = osp.dirname(osp.abspath(__file__))
+parent_dir = osp.dirname(osp.dirname(osp.abspath(__file__)))
 with open(osp.join(parent_dir, "train_val_splits.yaml"), "r") as f:
     TRAIN_VAL_SPLITS = yaml.safe_load(f)
 
