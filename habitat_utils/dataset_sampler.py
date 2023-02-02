@@ -6,11 +6,6 @@ import os.path as osp
 
 import tqdm
 
-print("Importing habitat...")
-from habitat_baselines.config.default import get_config
-
-print("...done.")
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -25,6 +20,11 @@ def main():
 
     args = parser.parse_args()
 
+    print("Importing habitat...")
+    from habitat_baselines.config.default import get_config
+
+    print("...done.")
+
     config = get_config(args.exp_config)
     data_path_template = config.habitat.dataset.data_path
     data_path = data_path_template.format(split=args.split)
@@ -34,24 +34,28 @@ def main():
         for file in files:
             if file.endswith(".json.gz"):
                 gz_files.append(osp.join(root, file))
-    filtered_episodes = []
-    for gz_file in tqdm.tqdm(gz_files):
-        with gzip.open(gz_file, "rt") as f:
-            data_dict = json.load(f)
-            filtered_episodes.extend(
-                [
-                    ep
-                    for ep in data_dict["episodes"]
-                    if int(ep["episode_id"]) in args.episode_ids
-                ]
-            )
+    data_dict = extract_episode(args.episode_ids, gz_files)
+    filtered_episodes = [
+        ep for ep in data_dict["episodes"] if int(ep["episode_id"]) in args.episode_ids
+    ]
+    other = {k: v for k, v in data_dict.items() if k != "episodes"}
     new_data_path = f"data/{args.output_split}.json.gz"
     os.makedirs("data", exist_ok=True)
     with gzip.open(new_data_path, "wt") as f:
-        json.dump({"episodes": filtered_episodes}, f)
+        json.dump({"episodes": filtered_episodes, **other}, f)
 
     print("The following command opt will work with the new split:")
     print(f"habitat.dataset.data_path='data/{args.output_split}.json.gz'")
+
+
+def extract_episode(episode_ids, gz_files):
+    for gz_file in tqdm.tqdm(gz_files):
+        with gzip.open(gz_file, "rt") as f:
+            data_dict = json.load(f)
+        for ep in data_dict["episodes"]:
+            if int(ep["episode_id"]) in episode_ids:
+                return data_dict
+    return None
 
 
 if __name__ == "__main__":
