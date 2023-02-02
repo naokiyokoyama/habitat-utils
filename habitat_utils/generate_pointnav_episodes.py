@@ -37,6 +37,8 @@ def _generate_fn(
     out_file = osp.join(out_dir, f"{split}/content/{scene_name}.json.gz")
     if osp.exists(out_file) or osp.exists(out_file + ".incomplete"):
         return
+    # Create parent of out_file if it doesn't exist
+    os.makedirs(osp.dirname(out_file), exist_ok=True)
     # Create an empty file so other processes know this scene is being processed
     with open(out_file + ".incomplete", "w") as f:
         f.write("")
