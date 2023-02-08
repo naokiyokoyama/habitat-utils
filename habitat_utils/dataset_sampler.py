@@ -6,6 +6,8 @@ import os.path as osp
 
 import tqdm
 
+ALL_EPS = []
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -17,8 +19,20 @@ def main():
     parser.add_argument(
         "-o", "--output-split", type=str, help="Name of new split", default="debug"
     )
+    parser.add_argument(
+        "-p",
+        "--packages",
+        type=str,
+        help="Additional packages to import if desired, for updating habitat registry",
+    )
 
     args = parser.parse_args()
+
+    if args.packages is not None:
+        for package in args.packages.split(","):
+            print(f"Importing {package}...")
+            __import__(package)
+            print(f"...done.")
 
     print("Importing habitat...")
     from habitat_baselines.config.default import get_config
