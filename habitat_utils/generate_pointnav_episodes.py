@@ -142,7 +142,7 @@ if __name__ == "__main__":
         "--num_episodes_per_scene",
         type=int,
         help="Number of episodes per scene",
-        default=1e3,
+        default=1000,
     )
     args = parser.parse_args()
     assert args.dataset_type in [
