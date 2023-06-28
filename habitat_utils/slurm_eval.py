@@ -83,6 +83,26 @@ def main(
         evaluator.submit_eval_jobs()
         if min_ckpts != -1:
             time.sleep(60)  # Check once every minute
+
+        # Remove queued files AND their corresponding log file, if the queued
+        # file is over 10 hours old AND the log file does not contain stats
+        for i in glob.glob(osp.join(ckpt_dir, f"*.{prefix}_queued")):
+            if is_file_older_than_n_hours(i, 10):
+                os.remove(i)
+                log_dir = get_log_dir(ckpt_dir, logs_name)
+                log_file = osp.join(
+                    log_dir, osp.basename(i).replace(f".{prefix}_queued", ".log")
+                )
+                if osp.exists(log_file):
+                    with open(log_file, "r") as f:
+                        log_contents = f.read()
+                    if "Average episode " in log_contents:
+                        continue
+                    os.remove(log_file)
+                    print(f"Deleted {i} and its corresponding log file.")
+                else:
+                    print(f"Deleted {i} but couldn't find its log file.")
+
         new_stats_log_count = count_log_files(
             ckpt_dir, logs_name, needs_stats=True
         )
@@ -255,6 +275,22 @@ def count_log_files(ckpt_dir, logs_name, needs_stats=False):
                 filtered_logs.append(log)
         return len(filtered_logs)
     return len(logs)
+
+
+def is_file_older_than_n_hours(file_path, n=10):
+    if not os.path.exists(file_path):
+        return False  # File doesn't exist
+
+    creation_time = os.path.getctime(file_path)
+    current_time = datetime.now().timestamp()
+    time_difference = current_time - creation_time
+
+    hours_difference = time_difference / (60 * 60)  # Convert seconds to hours
+
+    if hours_difference > n:
+        return True  # File is older than 10 hours
+    else:
+        return False  # File is not older than 10 hours
 
 
 if __name__ == "__main__":
