@@ -52,7 +52,7 @@ def main(
 
     if force:
         print("Deleting all log files that don't have stats.")
-        remove_stale_queued_files(ckpt_dir, prefix, logs_name, force=True)
+        remove_stale_log_files(ckpt_dir, prefix, logs_name, force=True)
 
     if not osp.exists(ckpt_dir):
         print(f"Waiting for {ckpt_dir} to exist...")
@@ -66,7 +66,7 @@ def main(
         prefix,
         partition,
         logs_name,
-    hold,
+        hold,
     )
     log_count = count_log_files(ckpt_dir, logs_name, needs_stats=True)
     first = True
@@ -77,7 +77,7 @@ def main(
             time.sleep(60)  # Check once every minute
 
         # Remove stale .queued files and their incomplete logs
-        remove_stale_queued_files(ckpt_dir, prefix, logs_name)
+        remove_stale_log_files(ckpt_dir, prefix, logs_name)
 
         new_log_count = count_log_files(ckpt_dir, logs_name, needs_stats=True)
         if new_log_count > log_count:
@@ -105,7 +105,7 @@ class Evaluator:
         prefix,
         partition,
         logs_name,
-    hold,
+        hold,
     ):
         self.ckpt_dir = osp.abspath(ckpt_dir)
         self.slurm_script = slurm_script
@@ -273,16 +273,20 @@ def is_file_older_than_n_hours(file_path, n=10):
         return False  # File is not older than 10 hours
 
 
-def remove_stale_queued_files(ckpt_dir, prefix, logs_name, force=False):
+def remove_stale_log_files(ckpt_dir, prefix, logs_name, force=False):
     """Remove queued files AND their corresponding log file, if the queued file is over
     10 hours old (or force is True) AND the log file does not contain stats"""
+    log_dir = get_log_dir(ckpt_dir, logs_name)
     for i in glob.glob(osp.join(ckpt_dir, f"*.{prefix}_queued")):
-        if force or is_file_older_than_n_hours(i, 10):
+        log_file = osp.join(
+            log_dir, osp.basename(i).replace(f".{prefix}_queued", ".log")
+        )
+        if force or (
+            osp.exists(log_file)
+            and is_file_older_than_n_hours(log_file, 5)
+            and not log_file_is_valid(log_file)
+        ):
             os.remove(i)
-            log_dir = get_log_dir(ckpt_dir, logs_name)
-            log_file = osp.join(
-                log_dir, osp.basename(i).replace(f".{prefix}_queued", ".log")
-            )
             if osp.exists(log_file):
                 if log_file_is_valid(log_file):
                     continue
