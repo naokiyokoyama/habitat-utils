@@ -44,24 +44,15 @@ def main(
     force,
     tb_name,
     logs_name,
+    hold,
 ):
     log_dir = get_log_dir(ckpt_dir, logs_name)
     if not osp.exists(log_dir):
         os.makedirs(log_dir)
 
     if force:
-        print(
-            "Force flag is set. Deleting all log files that don't have stats."
-        )
-        for log_file in glob.glob(osp.join(log_dir, "*.log")):
-            with open(log_file, "r") as f:
-                log_contents = f.read()
-            if "Average episode " not in log_contents:
-                print(f"Deleting {log_file}")
-                os.remove(log_file)
-        for i in glob.glob(osp.join(ckpt_dir, f"*.{prefix}_queued")):
-            os.remove(i)
-        print(f"Deleted all .{prefix}_queued dummy files.")
+        print("Deleting all log files that don't have stats.")
+        remove_stale_queued_files(ckpt_dir, prefix, logs_name, force=True)
 
     if not osp.exists(ckpt_dir):
         print(f"Waiting for {ckpt_dir} to exist...")
@@ -75,8 +66,9 @@ def main(
         prefix,
         partition,
         logs_name,
+    hold,
     )
-    stats_log_count = count_log_files(ckpt_dir, logs_name, needs_stats=True)
+    log_count = count_log_files(ckpt_dir, logs_name, needs_stats=True)
     first = True
     while first or count_log_files(ckpt_dir, logs_name) < min_ckpts:
         first = False
@@ -84,31 +76,13 @@ def main(
         if min_ckpts != -1:
             time.sleep(60)  # Check once every minute
 
-        # Remove queued files AND their corresponding log file, if the queued
-        # file is over 10 hours old AND the log file does not contain stats
-        for i in glob.glob(osp.join(ckpt_dir, f"*.{prefix}_queued")):
-            if is_file_older_than_n_hours(i, 10):
-                os.remove(i)
-                log_dir = get_log_dir(ckpt_dir, logs_name)
-                log_file = osp.join(
-                    log_dir, osp.basename(i).replace(f".{prefix}_queued", ".log")
-                )
-                if osp.exists(log_file):
-                    with open(log_file, "r") as f:
-                        log_contents = f.read()
-                    if "Average episode " in log_contents:
-                        continue
-                    os.remove(log_file)
-                    print(f"Deleted {i} and its corresponding log file.")
-                else:
-                    print(f"Deleted {i} but couldn't find its log file.")
+        # Remove stale .queued files and their incomplete logs
+        remove_stale_queued_files(ckpt_dir, prefix, logs_name)
 
-        new_stats_log_count = count_log_files(
-            ckpt_dir, logs_name, needs_stats=True
-        )
-        if new_stats_log_count > stats_log_count:
-            print(f"Found {new_stats_log_count} stats log files.")
-            stats_log_count = new_stats_log_count
+        new_log_count = count_log_files(ckpt_dir, logs_name, needs_stats=True)
+        if new_log_count > log_count:
+            print(f"Found {new_log_count} log files.")
+            log_count = new_log_count
             try:
                 print("Attempting to update tb logs...")
                 logs_to_tb(
@@ -119,6 +93,7 @@ def main(
             except Exception as e:
                 print(f"Failed to convert logs to tensorboard: {e}")
                 print("Continuing anyway.")
+        remove_old_tmp_files()  # Remove tmp files older than 48 hours
 
 
 class Evaluator:
@@ -130,6 +105,7 @@ class Evaluator:
         prefix,
         partition,
         logs_name,
+    hold,
     ):
         self.ckpt_dir = osp.abspath(ckpt_dir)
         self.slurm_script = slurm_script
@@ -139,6 +115,7 @@ class Evaluator:
         self.generate_bash_script()
         self.generate_slurm_script()
         self.logs_name = logs_name
+        self.hold = hold
 
     def generate_bash_script(self):
         with open(SINGLE_CKPT_TEMPLATE, "r") as f:
@@ -197,6 +174,8 @@ class Evaluator:
             f"{CKPT_SEPARATOR.join(checkpoints)},"
             f"SLURM_LOG_DIR={log_dir}",
         ]
+        if self.hold:
+            sbatch_cmd.insert(1, "--hold")
         if self.partition is not None:
             sbatch_cmd.extend(["--partition", self.partition])
             if self.partition == "overcap":
@@ -257,6 +236,12 @@ class Evaluator:
         return unqueued_checkpoints
 
 
+def log_file_is_valid(log_file):
+    with open(log_file, "r") as f:
+        log_contents = f.read()
+    return "Average episode " in log_contents
+
+
 def get_log_dir(ckpt_dir, logs_name):
     """Get the log directory for the given ckpt directory."""
     return osp.join(osp.dirname(osp.abspath(ckpt_dir)), logs_name)
@@ -267,12 +252,7 @@ def count_log_files(ckpt_dir, logs_name, needs_stats=False):
     log_dir = get_log_dir(ckpt_dir, logs_name)
     logs = glob.glob(osp.join(log_dir, "*.log"))
     if needs_stats:
-        filtered_logs = []
-        for log in logs:
-            with open(log, "r") as f:
-                log_contents = f.read()
-            if "Average episode " in log_contents:
-                filtered_logs.append(log)
+        filtered_logs = [log for log in logs if log_file_is_valid(log)]
         return len(filtered_logs)
     return len(logs)
 
@@ -291,6 +271,35 @@ def is_file_older_than_n_hours(file_path, n=10):
         return True  # File is older than 10 hours
     else:
         return False  # File is not older than 10 hours
+
+
+def remove_stale_queued_files(ckpt_dir, prefix, logs_name, force=False):
+    """Remove queued files AND their corresponding log file, if the queued file is over
+    10 hours old (or force is True) AND the log file does not contain stats"""
+    for i in glob.glob(osp.join(ckpt_dir, f"*.{prefix}_queued")):
+        if force or is_file_older_than_n_hours(i, 10):
+            os.remove(i)
+            log_dir = get_log_dir(ckpt_dir, logs_name)
+            log_file = osp.join(
+                log_dir, osp.basename(i).replace(f".{prefix}_queued", ".log")
+            )
+            if osp.exists(log_file):
+                if log_file_is_valid(log_file):
+                    continue
+                os.remove(log_file)
+                print(f"Deleted {i} and its corresponding log file.")
+            else:
+                print(f"Deleted {i} but couldn't find its log file.")
+
+
+def remove_old_tmp_files():
+    tmp_files = glob.glob(osp.join(THIS_DIR, f"tmp_*.sh"))
+    for f in tmp_files:
+        if is_file_older_than_n_hours(f, 48):
+            try:
+                os.remove(f)
+            except FileNotFoundError:
+                pass
 
 
 if __name__ == "__main__":
@@ -338,6 +347,11 @@ if __name__ == "__main__":
         "--logs-name",
         help="Name of the log directory (default=logs)",
         default="logs",
+    )
+    parser.add_argument(
+        "--hold",
+        help="Whether to submit jobs in a held state (default=False)",
+        action="store_true",
     )
     args = parser.parse_args()
     main(**vars(args))
